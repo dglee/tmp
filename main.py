@@ -39,12 +39,12 @@ def get_validation_loss(sess, current_val_data, wordtoix, s_att, t_att, att_name
     
 
         for ind, feat in enumerate(current_vis_feats_vals):
-            feat = np.reshape(feat, [n_video_lstm_step, dim_image])
+            #feat = np.reshape(feat, [n_video_lstm_step, dim_image])
             current_vis_feats[ind][:len(current_vis_feats_vals[ind])] = feat
 
 
         current_c3d_feats_path = current_batch['c3d_feat_path'].values
-        current_c3d_feats = np.zeros((batch_size, length_c3d, dim_c3d ))
+        current_c3d_feats = np.zeros((batch_size, length_c3d, dim_c3d))
         current_c3d_feats_val = map(lambda vid: np.load(vid), current_c3d_feats_path)
 
         for ind, feat in enumerate(current_c3d_feats_val):
@@ -61,6 +61,7 @@ def get_validation_loss(sess, current_val_data, wordtoix, s_att, t_att, att_name
         
         current_caption_ind = map(lambda cap: [wordtoix[word] for word in cap.lower().split(' ')[:n_caption_lstm_step - 1]
                                                    if word in wordtoix], current_captions)
+    
         current_caption_matrix = np.zeros((batch_size, n_caption_lstm_step))
         current_caption_masks = np.zeros((batch_size, n_caption_lstm_step))
         for ind, row in enumerate(current_caption_masks):
@@ -112,6 +113,7 @@ def train():
             dim_hidden = dim_hidden,
             dim_c3d = dim_c3d,
             length_c3d = length_c3d,
+            c3d_space = c3d_space,
             batch_size = batch_size,
             n_lstm_step = n_frame_step,
             n_video_lstm_step = n_video_lstm_step,
@@ -130,9 +132,6 @@ def train():
     saver = tf.train.Saver(max_to_keep = 400)
     tf.global_variables_initializer().run()    
 
-    tr_loss_fd = open('./loss_txt/loss_tr.txt', 'w')
-    val_loss_fd = open('./loss_txt/loss_val.txt', 'w')
-    model_loss_fd = open('./loss_txt/loss_model.txt', 'w')
     
     loss_to_draw = []
     loss_to_draw_val = []
@@ -145,13 +144,8 @@ def train():
         np.random.shuffle(index)
         train_data = train_data.ix[index]
         current_train_data = train_data
-        
-        l_count=0
-        total_loss=0.0
-        loss_accumulator = []
-        
-        saving_schedule = []
 
+        saving_schedule = []
         step_size =  (int(len(current_train_data) * save_every_n_epoch) // batch_size ) * batch_size
         saving_schedule = range(0, len(current_train_data) - step_size, step_size)
         print saving_schedule
@@ -180,9 +174,9 @@ def train():
             current_c3d_feats = np.zeros((batch_size, length_c3d, dim_c3d ))
             current_c3d_feats_val = map(lambda vid: np.load(vid), current_c3d_feats_path)
 
-            for ind, feat in enumerate(current_c3d_feats_val):
-                feat = np.reshape(feat, [length_c3d, dim_c3d])
-                current_c3d_feats[ind][:len(current_c3d_feats_val[ind])] = feat
+            for ind2, feat2 in enumerate(current_c3d_feats_val):
+                feat2 = np.reshape(feat2, [length_c3d, dim_c3d])
+                current_c3d_feats[ind2][:len(current_c3d_feats_val[ind])] = feat2
 
             ###Attributes###
             current_s_att, current_t_att = get_att_batch(current_vis_feats_path, batch_size, s_att, t_att, att_name)            
@@ -199,8 +193,7 @@ def train():
                 valid_length = len(current_caption_ind[ind])
                 row[:valid_length+1] = 1
                 current_caption_matrix[ind, :valid_length] = current_caption_ind[ind]
-
-
+            
             _, train_loss = sess.run([train_op, tf_loss], feed_dict={
                     tf_video: current_vis_feats,
                     tf_c3d_feat: current_c3d_feats,
@@ -211,60 +204,29 @@ def train():
                     })
 
             loss_to_draw_train.append(train_loss)
-            #print 'idx: ', start, " Epoch: ", epoch, " loss: " , loss_val, ' Elapsed time: ', str((time.time() - start_time))
-            
-            total_loss += train_loss
 
-            loss_accumulator.append(train_loss)
-            l_count += 1
-            
+                        
             if start in saving_schedule:
                 print start
-                
-                e_loss =total_loss/l_count
-                train_loss = np.mean(loss_accumulator[-5:])
-                
+                train_loss = np.mean(loss_to_draw_train[-5:])
                 val_loss = get_validation_loss(sess, val_data, wordtoix, s_att, t_att, att_name, tf_loss, tf_video,
                                        tf_c3d_feat, tf_caption, tf_caption_mask, tf_spatial_att, tf_temporal_att)
-                loss_to_draw_val.append(val_loss)
-                tr_loss_fd.write('epoch ' + str(epoch) + 'step ' + str(start) + ' loss ' + str(e_loss) + '\n')
-                val_loss_fd.write('epoch ' + str(epoch) + 'step ' + str(start) + ' Val loss ' + str(val_loss) + '\n')
- 
-                remain_epoch = n_epochs - epoch
+                #print model loss
+                step_summary = print_remaining_time(epoch, start_time, step_summary, step_count, n_step, val_loss, train_loss)
                 
-                step_time = time.time() - start_time
-                step_summary[step_count] = step_time
-                average_step_time = np.sum(step_summary)/(step_count+ 1)
-        
-                remain_time = (average_step_time * remain_epoch * n_step) + (average_step_time * (n_step-step_count))
-                m, s = divmod(remain_time, 60) 
-                h, m = divmod(m, 60) 
-                
-                print "=============================================================================================="
-                print("Epoch: %d/%d Step: %d/%d Remain: %d h %d m  step: %.2f s  val_loss: %.3f  tr_loss: %.3f"%(epoch+1, n_epochs, step_count, n_step, h, m, step_time, val_loss, e_loss))
-                print "==============================================================================================\n"                
-                
+                #Draw loss image
                 loss_to_draw.append(np.mean(loss_to_draw_train))
-                plt_save_dir = loss_img_path
-                plt_save_img_name = str(model_counter) + '.png'
-                plt.plot(range(len(loss_to_draw)), loss_to_draw, color='g')
-                plt.plot(range(len(loss_to_draw_val)), loss_to_draw_val, color='b')
-                plt.grid(True)
-                plt.savefig(os.path.join(plt_save_dir, plt_save_img_name))     
-
+                loss_to_draw_val.append(val_loss)
+                draw_loss_graph(epoch, step_count, model_counter, loss_to_draw, loss_to_draw_val)
+                
+                #save model
                 print "Epoch ", epoch + 1, " step ", step_count, " is done. Saving the model ..."
                 sys.stdout.flush()
                 saver.save(sess, os.path.join(model_path, 'model'), global_step=model_counter)
-                model_loss_fd.write('Model ' + str(model_counter) + ' Tr loss ' + str(train_loss) +' Val loss ' + str(val_loss) + '\n')
 
                 model_counter +=1
                 step_count += 1
 
-
-    tr_loss_fd.close()
-    val_loss_fd.close()
-    model_loss_fd.close()
-            
 
 def test(model_path):
     scorer = COCOScorer()
@@ -288,6 +250,7 @@ def test(model_path):
             dim_hidden = dim_hidden,
             dim_c3d = dim_c3d,
             length_c3d = length_c3d,
+            c3d_space = c3d_space,
             batch_size = ts_batch_size,
             n_lstm_step = n_frame_step,
             n_video_lstm_step = n_video_lstm_step,
@@ -322,7 +285,7 @@ def test(model_path):
         for idx, vis_feat_path in enumerate(split):
             print idx, vis_feat_path
             video_feat = np.load(vis_feat_path)[None,...]
-            video_feat = np.reshape(video_feat, [1, n_video_lstm_step, dim_image])
+            #video_feat = np.reshape(video_feat, [1, n_video_lstm_step, dim_image])
             
             #load c3d feat
             videoID = vis_feat_path[len(ts_visf_path)+1:]
@@ -333,11 +296,7 @@ def test(model_path):
             idx = np.where(att_name == vis_feat_path)[0][0]
             current_s_att = np.reshape(s_att[idx], [1, n_video_lstm_step, n_attribute_category])
             current_t_att = np.reshape(t_att[idx], [1, n_video_lstm_step])
-            
-#            if video_feat.shape[1] == n_frame_step:
-#                video_mask = np.ones((video_feat.shape[0], video_feat.shape[1]))
-#            else:
-#                continue
+
 
             generated_word_index = sess.run(tf_caption, feed_dict={
                     tf_video:video_feat, 
@@ -369,10 +328,10 @@ def test(model_path):
 
 if __name__ == '__main__':
     #Training Model
-    #train()
+    train()
 #    
 ##    #Test Model
-    model_num = 199 #158981378
+    model_num = 1 #158981378
 #    
     saved_model = model_path + "/model-" + str(model_num)
     test(model_path = saved_model)

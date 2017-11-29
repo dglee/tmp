@@ -197,6 +197,31 @@ def get_att_batch(current_batch, b_size, s_att, t_att, att_name):
     return current_s_att, current_t_att
 
 
+def draw_loss_graph(epoch, step_count, model_counter, loss_to_draw, loss_to_draw_val):
+    plt_save_dir = loss_img_path
+    plt_save_img_name = str(model_counter) + '.png'
+    plt.plot(range(len(loss_to_draw)), loss_to_draw, color='g')
+    plt.plot(range(len(loss_to_draw_val)), loss_to_draw_val, color='b')
+    plt.grid(True)
+    plt.savefig(os.path.join(plt_save_dir, plt_save_img_name))     
+
+
+def print_remaining_time(epoch, start_time, step_summary, step_count, n_step, val_loss, train_loss):
+    remain_epoch = n_epochs - epoch    
+    step_time = time.time() - start_time
+    step_summary[step_count] = step_time
+    average_step_time = np.sum(step_summary)/(step_count+ 1)
+    remain_time = (average_step_time * remain_epoch * n_step) + (average_step_time * (n_step-step_count))
+    m, s = divmod(remain_time, 60) 
+    h, m = divmod(m, 60) 
+    
+    print "=============================================================================================="
+    print("Epoch: %d/%d Step: %d/%d Remain: %d h %d m  step: %.2f s  val_loss: %.3f  tr_loss: %.3f"%(epoch+1, n_epochs, step_count, n_step, h, m, step_time, val_loss, train_loss))
+    print "==============================================================================================\n"
+    
+    return step_summary
+
+
 
 def convert_data_to_coco_scorer_format(data_frame):
     gts = {}
